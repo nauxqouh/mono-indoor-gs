@@ -12,12 +12,14 @@
 import torch
 from torch import nn
 import numpy as np
+import cv2
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix
 
 class Camera(nn.Module):
-    def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
+    def __init__(self, resolution, colmap_id, R, T, FoVx, FoVy, depth_params, image, gt_alpha_mask, invdepthmap,
                  image_name, uid,
-                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda"
+                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0,
+                 data_device = "cuda"
                  ):
         super(Camera, self).__init__()
 
@@ -44,8 +46,32 @@ class Camera(nn.Module):
             # self.original_image *= gt_alpha_mask.to(self.data_device)
             self.gt_alpha_mask = gt_alpha_mask.to(self.data_device)
         else:
-            # self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device) # do we need this?
             self.gt_alpha_mask = None
+            if image.shape[0] == 4:
+                self.gt_alpha_mask = image[3:4, ...].to(self.data_device)
+            else:
+                self.gt_alpha_mask = torch.ones((1, self.image_height, self.image_width), device=self.data_device)
+
+        self.invdepthmap = None
+        self.depth_reliable = False
+        if invdepthmap is not None:
+            self.depth_mask = torch.ones_like(self.gt_alpha_mask)
+            self.invdepthmap = cv2.resize(invdepthmap, resolution)
+            self.invdepthmap[self.invdepthmap < 0] = 0
+            self.depth_reliable = True
+
+            if depth_params is not None:
+                if depth_params["scale"] < 0.2 * depth_params["med_scale"] or depth_params["scale"] > 5 * depth_params["med_scale"]:
+                    self.depth_reliable = False
+                    self.depth_mask *= 0
+                
+                if depth_params["scale"] > 0:
+                    self.invdepthmap = self.invdepthmap * depth_params["scale"] + depth_params["offset"]
+
+            if self.invdepthmap.ndim != 2:
+                self.invdepthmap = self.invdepthmap[..., 0]
+            self.invdepthmap = torch.from_numpy(self.invdepthmap[None]).to(self.data_device)
+            
         
         self.zfar = 100.0
         self.znear = 0.01

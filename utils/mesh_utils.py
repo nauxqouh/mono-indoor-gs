@@ -151,7 +151,7 @@ class GaussianExtractor(object):
         print("Running tsdf volume integration ...")
         print(f'voxel_size: {voxel_size}')
         print(f'sdf_trunc: {sdf_trunc}')
-        print(f'depth_truc: {depth_trunc}')
+        print(f'depth_trunc: {depth_trunc}')
 
         volume = o3d.pipelines.integration.ScalableTSDFVolume(
             voxel_length= voxel_size,

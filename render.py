@@ -69,20 +69,6 @@ if __name__ == "__main__":
         gaussExtractor.reconstruction(scene.getTestCameras())
         gaussExtractor.export_image(test_dir)
     
-    
-    if args.render_path:
-        print("render videos ...")
-        traj_dir = os.path.join(args.model_path, 'traj', "ours_{}".format(scene.loaded_iter))
-        os.makedirs(traj_dir, exist_ok=True)
-        n_fames = 240
-        cam_traj = generate_path(scene.getTrainCameras(), n_frames=n_fames)
-        gaussExtractor.reconstruction(cam_traj)
-        gaussExtractor.export_image(traj_dir)
-        create_videos(base_dir=traj_dir,
-                    input_dir=traj_dir, 
-                    out_name='render_traj', 
-                    num_frames=n_fames)
-
     if not args.skip_mesh:
         print("export mesh ...")
         os.makedirs(train_dir, exist_ok=True)
@@ -106,3 +92,16 @@ if __name__ == "__main__":
         mesh_post = post_process_mesh(mesh, cluster_to_keep=args.num_cluster)
         o3d.io.write_triangle_mesh(os.path.join(train_dir, name.replace('.ply', '_post.ply')), mesh_post)
         print("mesh post processed saved at {}".format(os.path.join(train_dir, name.replace('.ply', '_post.ply'))))
+        
+    if args.render_path:
+        print("render videos ...")
+        traj_dir = os.path.join(args.model_path, 'traj', "ours_{}".format(scene.loaded_iter))
+        os.makedirs(traj_dir, exist_ok=True)
+        n_fames = 240
+        cam_traj = generate_path(scene.getTrainCameras(), n_frames=n_fames)
+        gaussExtractor.reconstruction(cam_traj)
+        gaussExtractor.export_image(traj_dir)
+        create_videos(base_dir=traj_dir,
+                    input_dir=traj_dir, 
+                    out_name='render_traj', 
+                    num_frames=n_fames)

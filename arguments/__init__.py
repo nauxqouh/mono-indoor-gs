@@ -93,8 +93,17 @@ class OptimizationParams(ParamGroup):
         self.densify_from_iter = 500
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002
+        
         self.depth_l1_weight_init = 1.0
         self.depth_l1_weight_final = 0.01
+        self.dn_weight_init = 2.0
+        self.dn_weight_final = 0.02
+        
+        self.lambda_aniso = 0.01
+        self.max_aniso_ratio = 4.0
+        self.lambda_size = 0.002
+        self.point_size = 15
+        
         self.random_background = False
         super().__init__(parser, "Optimization Parameters")
 

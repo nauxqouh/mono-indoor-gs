@@ -56,7 +56,7 @@ class Camera(nn.Module):
         self.depth_reliable = False
         if invdepthmap is not None:
             self.depth_mask = torch.ones_like(self.gt_alpha_mask)
-            self.invdepthmap = cv2.resize(invdepthmap, resolution)
+            self.invdepthmap = cv2.resize(invdepthmap, resolution, interpolation=cv2.INTER_NEAREST)
             self.invdepthmap[self.invdepthmap < 0] = 0
             self.depth_reliable = True
 
@@ -67,6 +67,8 @@ class Camera(nn.Module):
                 
                 if depth_params["scale"] > 0:
                     self.invdepthmap = self.invdepthmap * depth_params["scale"] + depth_params["offset"]
+            
+            self.invdepthmap[self.invdepthmap < 0] = 0
 
             if self.invdepthmap.ndim != 2:
                 self.invdepthmap = self.invdepthmap[..., 0]

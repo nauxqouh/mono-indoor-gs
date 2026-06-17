@@ -11,6 +11,8 @@
 
 import os
 import torch
+import torch.nn.functional as F
+import wandb
 from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer import render, network_gui
@@ -31,6 +33,7 @@ except ImportError:
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
+    wandb.init(project="2dgs-indoor-mono-geometry", name=os.path.basename(dataset.model_path))
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
@@ -45,6 +48,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_end = torch.cuda.Event(enable_timing = True)
     
     depth_l1_weight = get_expon_lr_func(opt.depth_l1_weight_init, opt.depth_l1_weight_final, max_steps=opt.iterations)
+    #dn_weight = get_expon_lr_func(opt.dn_weight_init, opt.dn_weight_final, max_steps=opt.iterations)
 
     viewpoint_stack = scene.getTrainCameras().copy()
     viewpoint_indices = list(range(len(viewpoint_stack)))
@@ -87,20 +91,41 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         
+        alpha_mask = (render_pkg["rend_alpha"] > 0.5).detach()
+        
         # Depth regularization
         Ll1depth_pure = 0.0
         if depth_l1_weight(iteration) > 0 and viewpoint_cam.depth_reliable:
             # inverse depth the same as 3dgs
             invDepth = 1.0 / (render_pkg["surf_depth"] + 1e-6)
             mono_invdepth = viewpoint_cam.invdepthmap.cuda()
-            depth_mask = viewpoint_cam.depth_mask.cuda()
+            depth_mask = viewpoint_cam.depth_mask.cuda() * alpha_mask
 
-            Ll1depth_pure = torch.abs((invDepth  - mono_invdepth) * depth_mask).mean()
+            loss_map = torch.abs((invDepth  - mono_invdepth) * depth_mask)
+            Ll1depth_pure = loss_map.sum() / (depth_mask.sum() + 1e-6)
             Ll1depth = depth_l1_weight(iteration) * Ll1depth_pure 
             loss += Ll1depth
             Ll1depth = Ll1depth.item()
         else:
             Ll1depth = 0
+        
+        # Anisotropy regularization
+        # scales = gaussians.get_scaling
+        # s_max = torch.max(scales, dim=1).values
+        # s_min = torch.min(scales, dim=1).values
+        # # anisotropy ratio show the shape of gaussian elipse
+        # aniso_ratio = s_max / (s_min + 1e-6)
+
+        # lambda_aniso = opt.lambda_aniso if iteration > 5000 else 0.0
+        # lambda_size = opt.lambda_size if iteration > 5000 else 0.0
+        # # max_aniso_ratio: default 4.0
+        # # lambda_aniso: default 0.05
+        # aniso_loss = lambda_aniso * torch.clamp(aniso_ratio - opt.max_aniso_ratio, min=0.0).mean()
+        # # point_size: default 15
+        # # lambda_size: default 0.001
+        # ps_loss = lambda_size * torch.clamp(s_max - opt.point_size, min=0.0).mean()
+        # loss += aniso_loss
+        # loss += ps_loss
             
         # regularization
         lambda_normal = opt.lambda_normal if iteration > 7000 else 0.0
@@ -138,6 +163,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.set_postfix(loss_dict)
 
                 progress_bar.update(10)
+                
+                wandb.log({
+                    "Loss/total": total_loss.item(),
+                    "Loss/depth_priors": Ll1depth.item() if isinstance(Ll1depth, torch.Tensor) else Ll1depth,
+                    "Loss/dist": dist_loss.item(),
+                    "Loss/normal": normal_loss.item(),
+                    "Stats/num_points": len(gaussians.get_xyz),
+                    "Iteration": iteration
+                })
+                
             if iteration == opt.iterations:
                 progress_bar.close()
 
@@ -196,6 +231,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 except Exception as e:
                     # raise e
                     network_gui.conn = None
+    wandb.finish()
 
 def prepare_output_and_logger(args):    
     if not args.model_path:

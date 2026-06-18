@@ -114,25 +114,25 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             Ll1depth = 0
             
         # gradient depth loss: local consistency
-        # def compute_gradient_loss(depth_map, alpha_mask):
-        #     """
-        #     depth_map: [1, H, W]
-        #     mask: [1, H, W] (binary mask)
-        #     """
-        #     dx = torch.abs(depth_map[:, :, 1:] - depth_map[:, :, :-1])
-        #     dy = torch.abs(depth_map[:, 1:, :] - depth_map[:, :-1, :])
+        def compute_gradient_loss(depth_map, alpha_mask):
+            """
+            depth_map: [1, H, W]
+            mask: [1, H, W] (binary mask)
+            """
+            dx = torch.abs(depth_map[:, :, 1:] - depth_map[:, :, :-1])
+            dy = torch.abs(depth_map[:, 1:, :] - depth_map[:, :-1, :])
 
-        #     mask_dx = alpha_mask[:, :, 1:] * alpha_mask[:, :, :-1]
-        #     mask_dy = alpha_mask[:, 1:, :] * alpha_mask[:, :-1, :]
+            mask_dx = alpha_mask[:, :, 1:] * alpha_mask[:, :, :-1]
+            mask_dy = alpha_mask[:, 1:, :] * alpha_mask[:, :-1, :]
 
-        #     loss_dx = (dx * mask_dx).sum() / (mask_dx.sum() + 1e-6)
-        #     loss_dy = (dy * mask_dy).sum() / (mask_dy.sum() + 1e-6)
+            loss_dx = (dx * mask_dx).sum() / (mask_dx.sum() + 1e-6)
+            loss_dy = (dy * mask_dy).sum() / (mask_dy.sum() + 1e-6)
 
-        #     return loss_dx + loss_dy
+            return loss_dx + loss_dy
         
-        # if depth_grad_weight(iteration) > 0:
-        #     L_grad_depth = depth_grad_weight(iteration) * compute_gradient_loss(render_pkg["surf_depth"], alpha_mask)
-        #     loss += L_grad_depth
+        if depth_grad_weight(iteration) > 0:
+            L_grad_depth = depth_grad_weight(iteration) * compute_gradient_loss(render_pkg["surf_depth"], alpha_mask)
+            loss += L_grad_depth
         
         # Anisotropy regularization
         # scales = gaussians.get_scaling
@@ -192,7 +192,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             wandb.log({
                 "Loss/total": total_loss.item(),
                 "Loss/depth_priors": Ll1depth.item() if isinstance(Ll1depth, torch.Tensor) else Ll1depth,
-                #"Loss/L_grad_depth": L_grad_depth.item() if isinstance(L_grad_depth, torch.Tensor) else L_grad_depth,
+                "Loss/L_grad_depth": L_grad_depth.item() if isinstance(L_grad_depth, torch.Tensor) else L_grad_depth,
                 "Loss/dist": dist_loss.item(),
                 "Loss/normal": normal_loss.item(),
                 "Stats/num_points": len(gaussians.get_xyz),

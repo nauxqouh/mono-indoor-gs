@@ -96,8 +96,8 @@ class OptimizationParams(ParamGroup):
         
         self.depth_l1_weight_init = 1.0
         self.depth_l1_weight_final = 0.01
-        self.dn_weight_init = 2.0
-        self.dn_weight_final = 0.02
+        self.grad_weight_init = 0.001
+        self.grad_weight_final = 0.08
         
         self.lambda_aniso = 0.01
         self.max_aniso_ratio = 4.0

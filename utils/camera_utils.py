@@ -22,7 +22,7 @@ def loadCam(args, id, cam_info, resolution_scale):
     
     if cam_info.depth_path != "":
         try:
-            invdepthmap = cv2.imread(cam_info.depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / 1000
+            invdepthmap = cv2.imread(cam_info.depth_path, -1).astype(np.float32) / float(2**16)
 
         except FileNotFoundError:
             print(f"Error: The depth file at path '{cam_info.depth_path}' was not found.")

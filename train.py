@@ -24,6 +24,10 @@ from tqdm import tqdm
 from utils.image_utils import psnr, render_net_image
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from datetime import datetime
+
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -33,7 +37,8 @@ except ImportError:
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    wandb.init(project="2dgs-indoor-mono-geometry", name=os.path.basename(dataset.model_path))
+    run_name = f"{os.path.basename(dataset.model_path)}_{timestamp}"
+    wandb.init(project="2dgs-indoor-mono-geometry", name=run_name)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
@@ -48,7 +53,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_end = torch.cuda.Event(enable_timing = True)
     
     depth_l1_weight = get_expon_lr_func(opt.depth_l1_weight_init, opt.depth_l1_weight_final, max_steps=opt.iterations)
-    #dn_weight = get_expon_lr_func(opt.dn_weight_init, opt.dn_weight_final, max_steps=opt.iterations)
+    depth_grad_weight = get_expon_lr_func(opt.grad_weight_init, opt.grad_weight_final, lr_delay_steps=7000, max_steps=opt.iterations)
 
     viewpoint_stack = scene.getTrainCameras().copy()
     viewpoint_indices = list(range(len(viewpoint_stack)))
@@ -91,10 +96,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         
-        alpha_mask = (render_pkg["rend_alpha"] > 0.5).detach()
-        
-        # Depth regularization
+        # Depth regularization: Global
         Ll1depth_pure = 0.0
+        alpha_mask = (render_pkg["rend_alpha"] > 0.5).detach()
         if depth_l1_weight(iteration) > 0 and viewpoint_cam.depth_reliable:
             # inverse depth the same as 3dgs
             invDepth = 1.0 / (render_pkg["surf_depth"] + 1e-6)
@@ -103,11 +107,32 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             loss_map = torch.abs((invDepth  - mono_invdepth) * depth_mask)
             Ll1depth_pure = loss_map.sum() / (depth_mask.sum() + 1e-6)
-            Ll1depth = depth_l1_weight(iteration) * Ll1depth_pure 
+            Ll1depth = depth_l1_weight(iteration) * Ll1depth_pure
             loss += Ll1depth
             Ll1depth = Ll1depth.item()
         else:
             Ll1depth = 0
+            
+        # gradient depth loss: local consistency
+        def compute_gradient_loss(depth_map, alpha_mask):
+            """
+            depth_map: [1, H, W]
+            mask: [1, H, W] (binary mask)
+            """
+            dx = torch.abs(depth_map[:, :, 1:] - depth_map[:, :, :-1])
+            dy = torch.abs(depth_map[:, 1:, :] - depth_map[:, :-1, :])
+
+            mask_dx = alpha_mask[:, :, 1:] * alpha_mask[:, :, :-1]
+            mask_dy = alpha_mask[:, 1:, :] * alpha_mask[:, :-1, :]
+
+            loss_dx = (dx * mask_dx).sum() / (mask_dx.sum() + 1e-6)
+            loss_dy = (dy * mask_dy).sum() / (mask_dy.sum() + 1e-6)
+
+            return loss_dx + loss_dy
+        
+        if depth_grad_weight(iteration) > 0:
+            L_grad_depth = depth_grad_weight(iteration) * compute_gradient_loss(render_pkg["surf_depth"], alpha_mask)
+            loss += L_grad_depth
         
         # Anisotropy regularization
         # scales = gaussians.get_scaling
@@ -138,7 +163,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         normal_loss = lambda_normal * (normal_error).mean()
         dist_loss = lambda_dist * (rend_dist).mean()
 
-        # loss
+        # total loss
         total_loss = loss + dist_loss + normal_loss
         
         total_loss.backward()
@@ -164,14 +189,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 progress_bar.update(10)
                 
-                wandb.log({
-                    "Loss/total": total_loss.item(),
-                    "Loss/depth_priors": Ll1depth.item() if isinstance(Ll1depth, torch.Tensor) else Ll1depth,
-                    "Loss/dist": dist_loss.item(),
-                    "Loss/normal": normal_loss.item(),
-                    "Stats/num_points": len(gaussians.get_xyz),
-                    "Iteration": iteration
-                })
+            wandb.log({
+                "Loss/total": total_loss.item(),
+                "Loss/depth_priors": Ll1depth.item() if isinstance(Ll1depth, torch.Tensor) else Ll1depth,
+                "Loss/dist": dist_loss.item(),
+                "Loss/normal": normal_loss.item(),
+                "Stats/num_points": len(gaussians.get_xyz),
+                "Iteration": iteration
+            })
                 
             if iteration == opt.iterations:
                 progress_bar.close()

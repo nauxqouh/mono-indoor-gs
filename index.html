@@ -1,0 +1,42 @@
+<!-- python3 -m http.server 8000 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Gaussian Splatting Web Viewer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+                "@mkkellogg/gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d/build/gaussian-splats-3d.module.js"
+            }
+        }
+    </script>
+</head>
+<body>
+    <script type="module">
+        import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
+
+        const viewer = new GaussianSplats3D.Viewer({
+            'initialCameraPosition': [0, 0, 3], 
+            'cameraUp': [0, -1, 0],
+            'splatRenderMode': GaussianSplats3D.SplatRenderMode.TwoD,
+            'sharedMemoryForWorkers': false,
+            'plyInMemoryCompressionLevel': 0
+        });
+
+        viewer.addSplatScene('/point_cloud.ply', {
+            'showLoadingUI': true
+        })
+        .then(() => {
+            viewer.start(); 
+        });
+        
+    </script>
+</body>
+</html>

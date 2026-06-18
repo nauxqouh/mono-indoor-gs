@@ -192,6 +192,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             wandb.log({
                 "Loss/total": total_loss.item(),
                 "Loss/depth_priors": Ll1depth.item() if isinstance(Ll1depth, torch.Tensor) else Ll1depth,
+                "Loss/L_grad_depth": L_grad_depth.item() if isinstance(L_grad_depth, torch.Tensor) else L_grad_depth,
                 "Loss/dist": dist_loss.item(),
                 "Loss/normal": normal_loss.item(),
                 "Stats/num_points": len(gaussians.get_xyz),

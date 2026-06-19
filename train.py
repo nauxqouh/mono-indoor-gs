@@ -134,6 +134,21 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             L_grad_depth = depth_grad_weight(iteration) * compute_gradient_loss(render_pkg["surf_depth"], alpha_mask)
             loss += L_grad_depth
             
+        # Normal prior regularization: Global
+        lambda_l1_normal = opt.normal_l1_weight if iteration > 7000 else 0.0
+        lambda_cos_normal = opt.normal_cos_weight if iteration > 7000 else 0.0
+        normal_prior_loss = 0.0
+        if (lambda_l1_normal > 0 or lambda_cos_normal > 0) and (viewpoint_cam.normal_prior is not None):
+            normal_prior = viewpoint_cam.normal_prior.cuda()
+            render_normal_cam = render_pkg["rend_normal_cam"]
+            
+            Ll1normal = lambda_l1_normal * (torch.abs(render_normal_cam - normal_prior) * alpha_mask).sum() / (alpha_mask.sum() + 1e-6)
+            dot_product = (render_normal_cam * normal_prior).sum(dim=0, keepdim=True)
+            Lcosnormal = lambda_cos_normal * ((1.0 - dot_product) * alpha_mask).sum() / (alpha_mask.sum() + 1e-6)
+            
+            normal_prior_loss = Ll1normal + Lcosnormal
+            loss += normal_prior_loss
+            
         # Anisotropy regularization
         # scales = gaussians.get_scaling
         # s_max = torch.max(scales, dim=1).values
@@ -193,6 +208,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 "Loss/total": total_loss.item(),
                 "Loss/depth_priors": Ll1depth.item() if isinstance(Ll1depth, torch.Tensor) else Ll1depth,
                 "Loss/L_grad_depth": L_grad_depth.item() if isinstance(L_grad_depth, torch.Tensor) else L_grad_depth,
+                "Loss/normal_priors": normal_prior_loss.item() if isinstance(normal_prior_loss, torch.Tensor) else normal_prior_loss,
                 "Loss/dist": dist_loss.item(),
                 "Loss/normal": normal_loss.item(),
                 "Stats/num_points": len(gaussians.get_xyz),

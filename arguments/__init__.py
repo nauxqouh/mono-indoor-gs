@@ -99,6 +99,9 @@ class OptimizationParams(ParamGroup):
         self.grad_weight_init = 0.001
         self.grad_weight_final = 0.08
         
+        self.normal_l1_weight = 0.01
+        self.normal_cos_weight = 0.01
+        
         self.lambda_aniso = 0.01
         self.max_aniso_ratio = 4.0
         self.lambda_size = 0.002

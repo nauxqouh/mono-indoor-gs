@@ -121,7 +121,10 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     # transform normal from view space to world space
     render_normal = allmap[2:5]
     render_normal = (render_normal.permute(1,2,0) @ (viewpoint_camera.world_view_transform[:3,:3].T)).permute(2,0,1)
-    render_normal_cam = torch.nn.functional.normalize(render_normal, dim=0)
+    render_normal_cam = allmap[2:5].clone()
+    render_normal_cam[1] = -render_normal_cam[1] # OpenCV Y (down) -> OpenGL Y (up)
+    render_normal_cam[2] = -render_normal_cam[2] # OpenCV Z (in) -> OpenGL Z (out)
+    render_normal_cam = torch.nn.functional.normalize(render_normal_cam, dim=0)
     
     # get median depth map
     render_depth_median = allmap[5:6]
@@ -146,8 +149,11 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     surf_normal = surf_normal.permute(2,0,1)
     # remember to multiply with accum_alpha since render_normal is unnormalized.
     surf_normal = surf_normal * (render_alpha).detach()
-    surf_normal_cam = torch.nn.functional.normalize(surf_normal, dim=0)
 
+    surf_normal_cam = surf_normal.clone()
+    surf_normal_cam[1] = -surf_normal_cam[1] # OpenCV Y -> OpenGL Y
+    surf_normal_cam[2] = -surf_normal_cam[2] # OpenCV Z -> OpenGL Z
+    surf_normal_cam = torch.nn.functional.normalize(surf_normal_cam, dim=0)
 
     rets.update({
             'rend_alpha': render_alpha,

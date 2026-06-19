@@ -259,42 +259,43 @@ def compute_multiview_consistency_loss(
     L_geo = ((px_err_normalized + depth_err) * valid_f).sum() / n_valid
  
     # ── 3. Photometric consistency (NCC) ─────────────────────────────────────
-    def to_gray(rgb):
-        """[3, H, W] → [1, 1, H, W]  (BT.601 luminance weights)"""
-        g = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
-        return g.unsqueeze(0).unsqueeze(0)
+    # def to_gray(rgb):
+    #     """[3, H, W] → [1, 1, H, W]  (BT.601 luminance weights)"""
+    #     g = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+    #     return g.unsqueeze(0).unsqueeze(0)
  
-    gray_r = to_gray(gt_image_r)   # [1, 1, H, W]
-    gray_n = to_gray(gt_image_n)   # [1, 1, H_n, W_n]
+    # gray_r = to_gray(gt_image_r)   # [1, 1, H, W]
+    # gray_n = to_gray(gt_image_n)   # [1, 1, H_n, W_n]
  
-    # Warp neighbour grayscale to reference image space via the computed warp
-    gray_n_w = F.grid_sample(
-        gray_n, grid_fwd, mode="bilinear", padding_mode="zeros", align_corners=True
-    )  # [1, 1, H, W]   (differentiable w.r.t. depth through grid_fwd)
+    # # Warp neighbour grayscale to reference image space via the computed warp
+    # gray_n_w = F.grid_sample(
+    #     gray_n, grid_fwd, mode="bilinear", padding_mode="zeros", align_corners=True
+    # )  # [1, 1, H, W]   (differentiable w.r.t. depth through grid_fwd)
  
-    # Sliding-window NCC via convolution  (O(H·W), single pass)
-    pad = patch_size // 2
-    k_w = torch.ones(1, 1, patch_size, patch_size, device="cuda") / (patch_size ** 2)
+    # # Sliding-window NCC via convolution  (O(H·W), single pass)
+    # pad = patch_size // 2
+    # k_w = torch.ones(1, 1, patch_size, patch_size, device="cuda") / (patch_size ** 2)
  
-    def local_mean_var(x):
-        """x: [1, 1, H, W] → mu, var each [1, 1, H, W]"""
-        x_p = F.pad(x, [pad] * 4, mode="replicate")
-        mu  = F.conv2d(x_p, k_w)
-        mu2 = F.conv2d(x_p ** 2, k_w)
-        var = (mu2 - mu ** 2).clamp(min=1e-8)
-        return mu, var
+    # def local_mean_var(x):
+    #     """x: [1, 1, H, W] → mu, var each [1, 1, H, W]"""
+    #     x_p = F.pad(x, [pad] * 4, mode="replicate")
+    #     mu  = F.conv2d(x_p, k_w)
+    #     mu2 = F.conv2d(x_p ** 2, k_w)
+    #     var = (mu2 - mu ** 2).clamp(min=1e-8)
+    #     return mu, var
  
-    mu_r, var_r = local_mean_var(gray_r)
-    mu_n, var_n = local_mean_var(gray_n_w)
+    # mu_r, var_r = local_mean_var(gray_r)
+    # mu_n, var_n = local_mean_var(gray_n_w)
  
-    # Cross-covariance:  E[R·N] − E[R]·E[N]
-    r_p = F.pad(gray_r,   [pad] * 4, mode="replicate")
-    n_p = F.pad(gray_n_w, [pad] * 4, mode="replicate")
-    cov = F.conv2d(r_p * n_p, k_w) - mu_r * mu_n
+    # # Cross-covariance:  E[R·N] − E[R]·E[N]
+    # r_p = F.pad(gray_r,   [pad] * 4, mode="replicate")
+    # n_p = F.pad(gray_n_w, [pad] * 4, mode="replicate")
+    # cov = F.conv2d(r_p * n_p, k_w) - mu_r * mu_n
  
-    ncc = (cov / (torch.sqrt(var_r * var_n) + 1e-8)).clamp(-1.0, 1.0)
-    ncc = ncc.squeeze()   # [H, W]
+    # ncc = (cov / (torch.sqrt(var_r * var_n) + 1e-8)).clamp(-1.0, 1.0)
+    # ncc = ncc.squeeze()   # [H, W]
  
-    L_pho = ((1.0 - ncc) * valid_f).sum() / n_valid
+    # L_pho = ((1.0 - ncc) * valid_f).sum() / n_valid
+    L_pho = 0.0
  
     return L_geo, L_pho

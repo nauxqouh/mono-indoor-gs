@@ -100,8 +100,8 @@ class OptimizationParams(ParamGroup):
         self.grad_weight_final = 0.08
         
         # mvc
-        self.lambda_geo = 0.1
-        self.lambda_pho = 0.1
+        self.lambda_geo = 0.05
+        self.lambda_pho = 0.0
         self.mvc_k = 10
         self.mvc_ncc_patch_size = 7
         

@@ -189,10 +189,20 @@ def compute_multiview_consistency_loss(
     )
  
     # Sample depth & alpha from the neighbour render at warped locations
+    # def gs(src, grid):
+    #     return F.grid_sample(
+    #         src, grid, mode="bilinear", padding_mode="zeros", align_corners=True
+    #     ).squeeze()
+    
     def gs(src, grid):
-        return F.grid_sample(
+        # src: 3D [1, H, W], add 1 dimension to 4D [1, 1, H, W]
+        if src.dim() == 3:
+            src = src.unsqueeze(0)  
+        out = F.grid_sample(
             src, grid, mode="bilinear", padding_mode="zeros", align_corners=True
-        ).squeeze()
+        )
+        # Squeeze N and C to return 2D [H, W]
+        return out.squeeze(0).squeeze(0)
  
     sampled_d_n = gs(depth_n, grid_fwd)   # [H, W]
     sampled_a_n = gs(alpha_n, grid_fwd)   # [H, W]

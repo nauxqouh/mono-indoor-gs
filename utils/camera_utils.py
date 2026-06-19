@@ -14,6 +14,7 @@ import numpy as np
 import cv2
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
+import torch
 
 WARNED = False
 
@@ -35,6 +36,21 @@ def loadCam(args, id, cam_info, resolution_scale):
             raise
     else:
         invdepthmap = None
+        
+    if cam_info.normal_path != "":
+        try:
+            normal_prior = torch.from_numpy(np.load(cam_info.normal_path)).float()
+        except FileNotFoundError:
+            print(f"Error: The normal file at path '{cam_info.normal_path}' was not found.")
+            raise
+        except IOError:
+            print(f"Error: Unable to open the .npy file '{cam_info.normal_path}'. It may be corrupted or an unsupported format.")
+            raise
+        except Exception as e:
+            print(f"An unexpected error occurred when trying to read normal at {cam_info.normal_path}: {e}")
+            raise
+    else:
+        normal_prior = None
         
     if args.resolution in [1, 2, 4, 8]:
         resolution = round(orig_w/(resolution_scale * args.resolution)), round(orig_h/(resolution_scale * args.resolution))
@@ -68,7 +84,7 @@ def loadCam(args, id, cam_info, resolution_scale):
     return Camera(resolution=resolution, colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, depth_params=cam_info.depth_params,
                   image=gt_image, 
-                  gt_alpha_mask=loaded_mask, invdepthmap=invdepthmap,
+                  gt_alpha_mask=loaded_mask, invdepthmap=invdepthmap, normal_prior=normal_prior,
                   image_name=cam_info.image_name, uid=id, data_device=args.data_device)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):

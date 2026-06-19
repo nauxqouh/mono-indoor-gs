@@ -34,6 +34,7 @@ class CameraInfo(NamedTuple):
     image_path: str
     image_name: str
     depth_path: str
+    normal_path: str
     width: int
     height: int
 
@@ -67,7 +68,7 @@ def getNerfppNorm(cam_info):
 
     return {"translate": translate, "radius": radius}
 
-def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_folder, depths_folder):
+def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_folder, depths_folder, normals_folder):
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
         sys.stdout.write('\r')
@@ -108,9 +109,12 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_fold
         image_name = os.path.basename(image_path).split(".")[0]
         image = Image.open(image_path)
         depth_path = os.path.join(depths_folder, f"{extr.name[:-n_remove]}.png") if depths_folder != "" else ""
+        
+        normal_path = os.path.join(normals_folder, f"{extr.name[:-n_remove]}.npy") if normals_folder != "" else ""
 
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, depth_params=depth_params, image=image,
-                              image_path=image_path, image_name=image_name, depth_path=depth_path, width=width, height=height)
+                              image_path=image_path, image_name=image_name, depth_path=depth_path, normal_path=normal_path, 
+                              width=width, height=height)
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -140,7 +144,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, depths, eval, llffhold=8):
+def readColmapSceneInfo(path, images, depths, normals, eval, llffhold=8):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -172,12 +176,13 @@ def readColmapSceneInfo(path, images, depths, eval, llffhold=8):
         except Exception as e:
             print(f"An unexpected error occurred when trying to open depth_params.json file: {e}")
             sys.exit(1)
-            
+              
     reading_dir = "images" if images == None else images
     cam_infos_unsorted = readColmapCameras(
         cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, depths_params=depths_params,
         images_folder=os.path.join(path, reading_dir),
-        depths_folder=os.path.join(path, depths) if depths != "" else "")
+        depths_folder=os.path.join(path, depths) if depths != "" else "",
+        normals_folder=os.path.join(path, normals) if normals != "" else "")
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     if eval:
@@ -211,7 +216,7 @@ def readColmapSceneInfo(path, images, depths, eval, llffhold=8):
                            ply_path=ply_path)
     return scene_info
 
-def readCamerasFromTransforms(path, transformsfile, depths_folder, white_background, extension=".png"):
+def readCamerasFromTransforms(path, transformsfile, depths_folder, normals_folder, white_background, extension=".png"):
     cam_infos = []
 
     with open(os.path.join(path, transformsfile)) as json_file:
@@ -249,20 +254,22 @@ def readCamerasFromTransforms(path, transformsfile, depths_folder, white_backgro
             FovX = fovx
             
             depth_path = os.path.join(depths_folder, f"{image_name}.png") if depths_folder != "" else ""
+            normal_path = os.path.join(normals_folder, f"{image_name}.png") if normals_folder != "" else ""
 
             cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
                             image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1],
-                            depth_path=depth_path, depth_params=None))
+                            depth_path=depth_path, depth_params=None, normal_path=normal_path))
             
     return cam_infos
 
-def readNerfSyntheticInfo(path, white_background, depths, eval, extension=".png"):
+def readNerfSyntheticInfo(path, white_background, depths, normals, eval, extension=".png"):
     
     depths_folder=os.path.join(path, depths) if depths != "" else ""
+    normals_folder=os.path.join(path, normals) if normals != "" else ""
     print("Reading Training Transforms")
-    train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json",depths_folder, white_background, extension)
+    train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json",depths_folder, normals_folder, white_background, extension)
     print("Reading Test Transforms")
-    test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", depths_folder, white_background, extension)
+    test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", depths_folder, normals_folder, white_background, extension)
     
     if not eval:
         train_cam_infos.extend(test_cam_infos)

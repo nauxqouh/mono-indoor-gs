@@ -133,7 +133,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if depth_grad_weight(iteration) > 0:
             L_grad_depth = depth_grad_weight(iteration) * compute_gradient_loss(render_pkg["surf_depth"], alpha_mask)
             loss += L_grad_depth
-        
+            
         # Anisotropy regularization
         # scales = gaussians.get_scaling
         # s_max = torch.max(scales, dim=1).values

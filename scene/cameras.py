@@ -16,7 +16,7 @@ import cv2
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix
 
 class Camera(nn.Module):
-    def __init__(self, resolution, colmap_id, R, T, FoVx, FoVy, depth_params, image, gt_alpha_mask, invdepthmap,
+    def __init__(self, resolution, colmap_id, R, T, FoVx, FoVy, depth_params, image, gt_alpha_mask, invdepthmap, normal_prior,
                  image_name, uid,
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0,
                  data_device = "cuda"
@@ -72,6 +72,22 @@ class Camera(nn.Module):
                 self.invdepthmap = self.invdepthmap[..., 0]
             self.invdepthmap = torch.from_numpy(self.invdepthmap[None]).to(self.data_device)
             
+        self.normal_prior = None
+        if normal_prior is not None:
+            # normal_prior from loadCam [H, W, 3] on CPU
+            # transform to [1, 3, H, W]
+            normal_tensor = normal_prior.permute(2, 0, 1).unsqueeze(0)
+            # (resolution[1] = Height, resolution[0] = Width)
+            normal_tensor = torch.nn.functional.interpolate(
+                normal_tensor, 
+                size=(resolution[1], resolution[0]), 
+                mode='bilinear', 
+                align_corners=True
+            )
+            # remove batch dimension -> tensor [3, H, W]
+            normal_tensor = normal_tensor.squeeze(0)
+            # normalized: length = 1 and on GPU
+            self.normal_prior = torch.nn.functional.normalize(normal_tensor, dim=0).to(self.data_device)
         
         self.zfar = 100.0
         self.znear = 0.01

@@ -25,6 +25,7 @@ from utils.image_utils import psnr, render_net_image
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from datetime import datetime
+from utils.mvc_utils import build_neighbor_table, sample_neighbor, compute_multiview_consistency_loss
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
 
@@ -61,6 +62,24 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_dist_for_log = 0.0
     ema_normal_for_log = 0.0
     ema_Ll1depth_for_log = 0.0
+    ema_mv_geo_for_log  = 0.0
+    ema_mv_pho_for_log  = 0.0
+    
+    # Pre-compute k-nearest neighbour table for multi-view consistency.
+    # `all_train_cameras` keeps a stable reference to every training camera;
+    # `vind` (tracked below) maps the current sample to this list.
+    all_train_cameras = scene.getTrainCameras()
+    use_mv = opt.lambda_geo > 0 or opt.lambda_pho > 0
+    if use_mv:
+        print(f"[MVC] Building {opt.mvc_k}-NN neighbour table for {len(all_train_cameras)} cameras …")
+        neighbor_table = build_neighbor_table(all_train_cameras, k=opt.mvc_k)
+        print("[MVC] Neighbour table ready.")
+        
+        print("[MVC] Pre-computing Camera R and T tensors to CUDA...")
+        for cam in all_train_cameras:
+            cam.R_cuda = torch.tensor(cam.R, dtype=torch.float32, device="cuda")
+            cam.T_cuda = torch.tensor(cam.T, dtype=torch.float32, device="cuda")
+        print("[MVC] Camera tensors ready.")
 
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
@@ -114,25 +133,25 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             Ll1depth = 0
             
         # gradient depth loss: local consistency
-        # def compute_gradient_loss(depth_map, alpha_mask):
-        #     """
-        #     depth_map: [1, H, W]
-        #     mask: [1, H, W] (binary mask)
-        #     """
-        #     dx = torch.abs(depth_map[:, :, 1:] - depth_map[:, :, :-1])
-        #     dy = torch.abs(depth_map[:, 1:, :] - depth_map[:, :-1, :])
+        def compute_gradient_loss(depth_map, alpha_mask):
+            """
+            depth_map: [1, H, W]
+            mask: [1, H, W] (binary mask)
+            """
+            dx = torch.abs(depth_map[:, :, 1:] - depth_map[:, :, :-1])
+            dy = torch.abs(depth_map[:, 1:, :] - depth_map[:, :-1, :])
 
-        #     mask_dx = alpha_mask[:, :, 1:] * alpha_mask[:, :, :-1]
-        #     mask_dy = alpha_mask[:, 1:, :] * alpha_mask[:, :-1, :]
+            mask_dx = alpha_mask[:, :, 1:] * alpha_mask[:, :, :-1]
+            mask_dy = alpha_mask[:, 1:, :] * alpha_mask[:, :-1, :]
 
-        #     loss_dx = (dx * mask_dx).sum() / (mask_dx.sum() + 1e-6)
-        #     loss_dy = (dy * mask_dy).sum() / (mask_dy.sum() + 1e-6)
+            loss_dx = (dx * mask_dx).sum() / (mask_dx.sum() + 1e-6)
+            loss_dy = (dy * mask_dy).sum() / (mask_dy.sum() + 1e-6)
 
-        #     return loss_dx + loss_dy
+            return loss_dx + loss_dy
         
-        # if depth_grad_weight(iteration) > 0:
-        #     L_grad_depth = depth_grad_weight(iteration) * compute_gradient_loss(render_pkg["surf_depth"], alpha_mask)
-        #     loss += L_grad_depth
+        if depth_grad_weight(iteration) > 0:
+            L_grad_depth = depth_grad_weight(iteration) * compute_gradient_loss(render_pkg["surf_depth"], alpha_mask)
+            loss += L_grad_depth
         
         # Anisotropy regularization
         # scales = gaussians.get_scaling
@@ -162,6 +181,38 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         normal_error = (1 - (rend_normal * surf_normal).sum(dim=0))[None]
         normal_loss = lambda_normal * (normal_error).mean()
         dist_loss = lambda_dist * (rend_dist).mean()
+        
+        # multi-view consistency loss
+        # One extra render per iteration (neighbour view).
+        L_mvc_geo = 0.0
+        L_mvc_pho = 0.0
+        mvc_loss  = torch.tensor(0.0, device="cuda")
+ 
+        lambda_geo = opt.lambda_geo if iteration > 3000 else 0.0
+        lambda_pho = opt.lambda_pho if iteration > 3000 else 0.0
+        
+        if use_mv and iteration > 3000:
+            # Select a neighbouring camera for this iteration
+            cam_n, _ = sample_neighbor(all_train_cameras, vind, neighbor_table)
+ 
+            # Render neighbour view (same random background for consistency)
+            render_pkg_n = render(cam_n, gaussians, pipe, bg)
+            gt_image_n   = cam_n.original_image.cuda()
+            if cam_n.gt_alpha_mask is not None:
+                render_pkg_n["render"] *= cam_n.gt_alpha_mask.cuda()
+ 
+            # Compute geometric + photometric consistency
+            L_mvc_geo, L_mvc_pho = compute_multiview_consistency_loss(
+                cam_r        = viewpoint_cam,
+                cam_n        = cam_n,
+                render_pkg_r = render_pkg,
+                render_pkg_n = render_pkg_n,
+                gt_image_r   = gt_image,
+                gt_image_n   = gt_image_n,
+                patch_size   = opt.mvc_ncc_patch_size,
+            )
+            mvc_loss = lambda_geo * L_mvc_geo + lambda_pho * L_mvc_pho
+            loss += mvc_loss
 
         # total loss
         total_loss = loss + dist_loss + normal_loss
@@ -192,7 +243,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             wandb.log({
                 "Loss/total": total_loss.item(),
                 "Loss/depth_priors": Ll1depth.item() if isinstance(Ll1depth, torch.Tensor) else Ll1depth,
-                #"Loss/L_grad_depth": L_grad_depth.item() if isinstance(L_grad_depth, torch.Tensor) else L_grad_depth,
+                "Loss/L_grad_depth": L_grad_depth.item() if isinstance(L_grad_depth, torch.Tensor) else L_grad_depth,
+                "Loss/L_mvc_geo": L_mvc_geo.item() if isinstance(L_mvc_geo, torch.Tensor) else 0.0,
+                "Loss/L_mvc_pho": L_mvc_pho.item() if isinstance(L_mvc_pho, torch.Tensor) else 0.0,
                 "Loss/dist": dist_loss.item(),
                 "Loss/normal": normal_loss.item(),
                 "Stats/num_points": len(gaussians.get_xyz),

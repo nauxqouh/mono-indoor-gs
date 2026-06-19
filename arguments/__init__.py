@@ -99,6 +99,12 @@ class OptimizationParams(ParamGroup):
         self.grad_weight_init = 0.001
         self.grad_weight_final = 0.08
         
+        # mvc
+        self.lambda_geo = 0.1
+        self.lambda_pho = 0.1
+        self.mvc_k = 10
+        self.mvc_ncc_patch_size = 7
+        
         self.lambda_aniso = 0.01
         self.max_aniso_ratio = 4.0
         self.lambda_size = 0.002
